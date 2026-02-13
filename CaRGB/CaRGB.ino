@@ -188,7 +188,7 @@ struct Zone {
   void renderShutoff(uint32_t /*nowMs*/) {
     if (!leds || Led_Count == 0) { Shutoff_Run = false; State = Zone_State::OFF; return; }
 
-    const uint16_t N = 200;
+    const uint16_t N = 100;
     const uint8_t p = progress8(Frame, N);
     const uint8_t inv = 255 - p;
 
@@ -238,7 +238,7 @@ struct Zone {
 CRGB Btn_RGB[Btn_RGB_Num];
 
 CRGB Pwr_RGB_Col  = CRGB::Green;
-uint8_t Pwr_RGB_Brt = 60;
+uint8_t Pwr_RGB_Brt = 30; //0-255
 
 static uint8_t Btn_State = 254;
 static uint8_t Btn_State_Last = 254;
@@ -248,7 +248,7 @@ static uint8_t Btn_State_Last = 254;
 #define Int_Pwr_Pin    D13
 #define Int_RGB_Pin    D5
 
-#define Int_RGB_Num    50
+#define Int_RGB_Num    140
 #define Int_RGB_Type   WS2812
 #define Int_RGB_Order  GRB
 CRGB Int_RGB[Int_RGB_Num];
@@ -356,24 +356,21 @@ void loop() {
   Z_Ext.applyPower();
   Z_Misc.applyPower();
 
-  Btn_State = (Z_Int.Btn << 2) | (Z_Ext.Btn << 1) | (Z_Misc.Btn << 0);
+  Btn_State = (Z_Misc.Btn << 2) | (Z_Ext.Btn << 1) | (Z_Int.Btn << 0);
 
   Z_Int.render(tStart);
   Z_Ext.render(tStart);
   Z_Misc.render(tStart);
 
+  applyBtnState(Btn_State);
+
+  /*
+  // This wouldnt work with strip animations. it only captures the initial frame on a STATE change. It needs to do it once for every frame render.
   if (Btn_State != Btn_State_Last) {
     applyBtnState(Btn_State);
     Btn_State_Last = Btn_State;
-
-    print_Debug("raw A0=%d A1=%d A2=%d | Btn I=%d E=%d M=%d | On I=%d E=%d M=%d | Off I=%d E=%d M=%d",
-      digitalRead(A0), digitalRead(A1), digitalRead(A2),
-      Z_Int.Btn, Z_Ext.Btn, Z_Misc.Btn,
-      Z_Int.Trig_On, Z_Ext.Trig_On, Z_Misc.Trig_On,
-      Z_Int.Trig_Off, Z_Ext.Trig_Off, Z_Misc.Trig_Off
-    );
-    delay(200);
   }
+  */
 
   FastLED.show();
 
@@ -389,22 +386,35 @@ void applyBtnState(uint8_t state) {
   const CRGB cExt  = (Z_Ext.leds  && Z_Ext.Led_Count  > 0) ? Z_Ext.leds[0]  : CRGB::Black;
   const CRGB cMisc = (Z_Misc.leds && Z_Misc.Led_Count > 0) ? Z_Misc.leds[0] : CRGB::Black;
 
+  const bool INT_ACTIVE  = (Z_Int.State  != Zone_State::OFF);
+  const bool EXT_ACTIVE  = (Z_Ext.State  != Zone_State::OFF);
+  const bool MISC_ACTIVE = (Z_Misc.State != Zone_State::OFF);
+
   // Clear all button LEDs
   fill_solid(Btn_RGB, Btn_RGB_Num, CRGB::Black);
-  Btn_RGB[3] = Pwr_RGB_Col;
+  Btn_RGB[0] = Pwr_RGB_Col;
 
-  // Power button base color
-  if (state & 0b100) {
+  // Apply brightness ONLY to the power button pixel initially.
+  if (Pwr_RGB_Brt < 255) {
+    Btn_RGB[0].nscale8_video(Pwr_RGB_Brt);
+  }
+
+  if (INT_ACTIVE) { //If interior button is pressed, write all buttons to match the current Int Frame number
     fill_solid(Btn_RGB, Btn_RGB_Num, cInt);
   }
 
-  if (state & 0b010) Btn_RGB[1] = cExt;
+  // if Ext button is pressed, overwrite that button w/ the current Ext frame color.
+  if (EXT_ACTIVE) {
+    Btn_RGB[2] = cExt;
+  }
 
-  if (state & 0b001) Btn_RGB[2] = cMisc;
-
-  // Apply brightness ONLY to the power button pixel
-  if (Pwr_RGB_Brt < 255) {
-    Btn_RGB[3].nscale8_video(Pwr_RGB_Brt);
+  // if Misc button is pressed, dim ALL lights / strips by 50%
+  if (MISC_ACTIVE) {
+    // Btn_RGB[3] = cMisc;
+    nscale8_video(Btn_RGB, Btn_RGB_Num, 127);  // 128 ≈ 50%
+    nscale8_video(Z_Int.leds,  Z_Int.Led_Count,  100);
+    nscale8_video(Z_Ext.leds,  Z_Ext.Led_Count,  100);
+    nscale8_video(Z_Misc.leds, Z_Misc.Led_Count, 100);
   }
 }
 
